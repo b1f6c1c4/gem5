@@ -34,9 +34,18 @@
 
 ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
     SimObject(params),
-    instPort(params->name + ".inst_port", this),
-    blocked(false)
+    port(params->name + ".port", this),
+    blocked(false),
+    state(state_t::IDLE)
 {
+}
+
+void
+ComputeDRAM::init()
+{
+    if (port.isConnected()) {
+        port.sendRangeChange();
+    }
 }
 
 Port &
@@ -46,8 +55,8 @@ ComputeDRAM::getPort(const std::string &if_name, PortID idx)
 
     // This is the name from the Python SimObject declaration
     // (ComputeDRAM.py)
-    if (if_name == "inst_port") {
-        return instPort;
+    if (if_name == "port") {
+        return port;
     } else {
         // pass it along to our super class
         return SimObject::getPort(if_name, idx);
@@ -127,58 +136,75 @@ ComputeDRAM::handleRequest(PacketPtr pkt)
 
     DPRINTF(ComputeDRAM, "Got request for addr %#x\n", pkt->getAddr());
 
-    // This memobj is now blocked waiting for the response to this packet.
+    uint32_t cfg_partial = (pkt->getAddr() & 0xff8ull) >> 3u;
+    switch (state) {
+        case state_t::IDLE:
+            val_cfg |= cfg_partial << 0u;
+            pkt->writeData(reinterpret_cast<uint8_t *>(&val_rs2));
+            state = state_t::SD1;
+            goto sd;
+        case state_t::SD1:
+            val_cfg |= cfg_partial << 8u;
+            pkt->writeData(reinterpret_cast<uint8_t *>(&val_rs1));
+            state = state_t::SD2;
+            goto sd;
+        case state_t::SD2:
+            val_cfg |= cfg_partial << 16u;
+            pkt->writeData(reinterpret_cast<uint8_t *>(&val_rd));
+            state = state_t::SD3;
+            goto sd;
+        case state_t::SD3:
+            assert(pkt->isRead());
+            val_cfg |= cfg_partial << 24u;
+            state = state_t::LD;
+            goto ld;
+        default:
+            panic("Invalid state");
+    }
+sd:
+    assert(pkt->isWrite());
+    pkt->makeResponse();
+    port.sendPacket(pkt);
+    port.trySendRetry();
+    return true;
+ld:
+
+    // This memobj is now blocked waiting for sending response back.
     blocked = true;
 
-    // Simply forward to the memory port
-    // TODO: memPort.sendPacket(pkt);
+    // TODO: actually process the instruction
 
-    return true;
-}
+    DPRINTF(ComputeDRAM, "Processing instruction %#x\n", val_cfg);
+    val_rd = 0x114514ull | (static_cast<uint64_t>(val_cfg) << 32ull);
+    pkt->setData(reinterpret_cast<uint8_t *>(&val_rd));
+    pkt->makeResponse();
+    port.sendPacket(pkt);
+    port.trySendRetry();
 
-/*
-bool
-ComputeDRAM::handleResponse(PacketPtr pkt)
-{
-    assert(blocked);
-    DPRINTF(ComputeDRAM, "Got response for addr %#x\n", pkt->getAddr());
-
-    // The packet is now done. We're about to put it in the port, no need for
-    // this object to continue to stall.
-    // We need to free the resource before sending the packet in case the CPU
-    // tries to send another request immediately (e.g., in the same callchain).
     blocked = false;
 
-    // Simply forward to the memory port
-    // TODO: instPort.sendPacket(pkt);
-
-    // For each of the cpu ports, if it needs to send a retry, it should do it
-    // now since this memory object may be unblocked now.
-    instPort.trySendRetry();
-
     return true;
 }
-*/
 
 void
 ComputeDRAM::handleFunctional(PacketPtr pkt)
 {
     // Just pass this on to the memory side to handle for now.
-    // TODO: memPort.sendFunctional(pkt);
+    // TODO: functional
+    panic("ComputeDRAM handleFunctional not implemented.");
 }
 
 AddrRangeList
 ComputeDRAM::getAddrRanges() const
 {
     DPRINTF(ComputeDRAM, "Sending new ranges\n");
-    // Just use the same ranges as whatever is on the memory side.
-    return {}; // TODO: return memPort.getAddrRanges();
+    return {{0xfffffffffffff000ull, 0xffffffffffffffffull}};
 }
 
 void
 ComputeDRAM::sendRangeChange()
 {
-    instPort.sendRangeChange();
+    port.sendRangeChange();
 }
 
 

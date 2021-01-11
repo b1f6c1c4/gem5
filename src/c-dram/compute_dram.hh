@@ -41,7 +41,7 @@ class ComputeDRAM : public SimObject
     /**
      * Port on the CPU-side that receives requests.
      * Mostly just forwards requests to the owner.
-     * Part of a vector of ports. One for each CPU port (e.g., data, inst)
+     * Part of a vector of ports. One for each CPU port.
      */
     class CPUSidePort : public ResponsePort
     {
@@ -139,8 +139,7 @@ class ComputeDRAM : public SimObject
     void handleFunctional(PacketPtr pkt);
 
     /**
-     * Return the address ranges this memobj is responsible for. Just use the
-     * same as the next upper level of the hierarchy.
+     * Return the address ranges this memobj is responsible for.
      *
      * @return the address ranges this memobj is responsible for
      */
@@ -152,10 +151,32 @@ class ComputeDRAM : public SimObject
     void sendRangeChange();
 
     /// Instantiation of the CPU-side ports
-    CPUSidePort instPort;
+    CPUSidePort port;
 
     /// True if this is currently blocked waiting for a response.
     bool blocked;
+
+    // State machine
+    enum class state_t {
+        IDLE,
+        SD1,
+        SD2,
+        SD3,
+        LD,
+    } state;
+
+    uint32_t val_cfg;
+    uint64_t val_rs2;
+    uint64_t val_rs1;
+    uint64_t val_rd;
+
+    uint64_t csr_vstart;
+    uint64_t csr_vcsr;
+    uint64_t csr_vl;
+    uint64_t csr_vtype;
+    uint64_t csr_vlenb;
+
+    std::array<std::vector<uint8_t>, 32> vreg;
 
   public:
 
@@ -175,6 +196,7 @@ class ComputeDRAM : public SimObject
      */
     Port &getPort(const std::string &if_name,
                   PortID idx=InvalidPortID) override;
+    void init() override;
 };
 
 

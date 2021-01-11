@@ -33,4 +33,4 @@ class ComputeDRAM(SimObject):
     type = 'ComputeDRAM'
     cxx_header = "c-dram/compute_dram.hh"
 
-    inst_port = ResponsePort("CPU side port, receives requests")
+    port = ResponsePort("This port sends responses and receives requests")
