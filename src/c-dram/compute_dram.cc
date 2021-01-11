@@ -35,6 +35,7 @@
 ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
     SimObject(params),
     port(params->name + ".port", this),
+    processEvent([this]{ processHandler(); }, name()),
     blocked(false),
     state(state_t::IDLE)
 {
@@ -136,43 +137,67 @@ ComputeDRAM::handleRequest(PacketPtr pkt)
 
     DPRINTF(ComputeDRAM, "Got request for addr %#x\n", pkt->getAddr());
 
+    assert(pkt->getSize() == 8);
+
     uint32_t cfg_partial = (pkt->getAddr() & 0xff8ull) >> 3u;
     switch (state) {
         case state_t::IDLE:
+            assert(pkt->isWrite());
             val_cfg |= cfg_partial << 0u;
             pkt->writeData(reinterpret_cast<uint8_t *>(&val_rs2));
             state = state_t::SD1;
-            goto sd;
+            break;
         case state_t::SD1:
+            assert(pkt->isWrite());
             val_cfg |= cfg_partial << 8u;
             pkt->writeData(reinterpret_cast<uint8_t *>(&val_rs1));
             state = state_t::SD2;
-            goto sd;
+            break;
         case state_t::SD2:
+            assert(pkt->isWrite());
             val_cfg |= cfg_partial << 16u;
             pkt->writeData(reinterpret_cast<uint8_t *>(&val_rd));
             state = state_t::SD3;
-            goto sd;
+            break;
         case state_t::SD3:
             assert(pkt->isRead());
             val_cfg |= cfg_partial << 24u;
             state = state_t::LD;
-            goto ld;
+            break;
         default:
             panic("Invalid state");
+            break;
     }
-sd:
-    assert(pkt->isWrite());
-    pkt->makeResponse();
-    port.sendPacket(pkt);
-    port.trySendRetry();
-    return true;
-ld:
 
     // This memobj is now blocked waiting for sending response back.
     blocked = true;
 
+    processing_pkt = pkt;
+    schedule(processEvent, curTick() + 1);
+
+    return true;
+}
+
+void
+ComputeDRAM::processHandler()
+{
+    auto pkt = processing_pkt;
+
+    blocked = false;
+
+    switch (state) {
+        case state_t::SD1:
+        case state_t::SD2:
+        case state_t::SD3:
+            pkt->makeResponse();
+            port.sendPacket(pkt);
+            port.trySendRetry();
+            processing_pkt = nullptr;
+            return;
+    }
+
     // TODO: actually process the instruction
+    // TODO: delay
 
     DPRINTF(ComputeDRAM, "Processing instruction %#x\n", val_cfg);
     val_rd = 0x114514ull | (static_cast<uint64_t>(val_cfg) << 32ull);
@@ -180,10 +205,8 @@ ld:
     pkt->makeResponse();
     port.sendPacket(pkt);
     port.trySendRetry();
-
-    blocked = false;
-
-    return true;
+    state = state_t::IDLE;
+    processing_pkt = nullptr;
 }
 
 void

@@ -153,10 +153,14 @@ class ComputeDRAM : public SimObject
     /// Instantiation of the CPU-side ports
     CPUSidePort port;
 
-    /// True if this is currently blocked waiting for a response.
+    PacketPtr processing_pkt;
+
+    void processHandler();
+
+    EventFunctionWrapper processEvent;
+
     bool blocked;
 
-    // State machine
     enum class state_t {
         IDLE,
         SD1,
