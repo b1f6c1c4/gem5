@@ -137,9 +137,19 @@ ComputeDRAM::handleRequest(PacketPtr pkt)
 
     DPRINTF(ComputeDRAM, "Got request for addr %#x\n", pkt->getAddr());
 
+    auto ticks = handleUniversal(pkt);
+    schedule(processEvent, curTick() + ticks);
+    return true;
+}
+
+Tick
+ComputeDRAM::handleUniversal(PacketPtr pkt)
+{
     assert(pkt->getSize() == 8);
 
     uint32_t cfg_partial = (pkt->getAddr() & 0xff8ull) >> 3u;
+
+    uint32_t ticks = 1;
     switch (state) {
         case state_t::IDLE:
             assert(pkt->isWrite());
@@ -163,19 +173,18 @@ ComputeDRAM::handleRequest(PacketPtr pkt)
             assert(pkt->isRead());
             val_cfg |= cfg_partial << 24u;
             state = state_t::LD;
+            controller.decode(val_cfg, val_rs2, val_rs1, val_rd);
+            ticks = 1 + controller.get_estimated_time();
             break;
         default:
             panic("Invalid state");
             break;
     }
 
-    // This memobj is now blocked waiting for sending response back.
     blocked = true;
-
     processing_pkt = pkt;
-    schedule(processEvent, curTick() + 1);
 
-    return true;
+    return ticks;
 }
 
 void
@@ -186,6 +195,9 @@ ComputeDRAM::processHandler()
     blocked = false;
 
     switch (state) {
+        case state_t::IDLE:
+            panic("Invalid state");
+            break;
         case state_t::SD1:
         case state_t::SD2:
         case state_t::SD3:
@@ -194,13 +206,11 @@ ComputeDRAM::processHandler()
             port.trySendRetry();
             processing_pkt = nullptr;
             return;
+        case state_t::LD:
+            break;
     }
 
-    // TODO: actually process the instruction
-    // TODO: delay
-
-    DPRINTF(ComputeDRAM, "Processing instruction %#x\n", val_cfg);
-    val_rd = 0x114514ull | (static_cast<uint64_t>(val_cfg) << 32ull);
+    val_rd = controller.execute();
     pkt->setData(reinterpret_cast<uint8_t *>(&val_rd));
     pkt->makeResponse();
     port.sendPacket(pkt);
@@ -212,9 +222,10 @@ ComputeDRAM::processHandler()
 void
 ComputeDRAM::handleFunctional(PacketPtr pkt)
 {
-    // Just pass this on to the memory side to handle for now.
-    // TODO: functional
-    panic("ComputeDRAM handleFunctional not implemented.");
+    DPRINTF(ComputeDRAM, "Got functional for addr %#x\n", pkt->getAddr());
+
+    handleUniversal(pkt);
+    processHandler();
 }
 
 AddrRangeList

@@ -31,5 +31,6 @@ Import('*')
 SimObject('ComputeDRAM.py')
 
 Source('compute_dram.cc')
+Source('rvv_controller.cc')
 
 DebugFlag('ComputeDRAM')

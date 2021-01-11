@@ -27,9 +27,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __C_DRAM_COMPUTE_DRAM_OBJ_HH__
-#define __C_DRAM_COMPUTE_DRAM_OBJ_HH__
+#ifndef __C_DRAM_COMPUTE_DRAM_HH__
+#define __C_DRAM_COMPUTE_DRAM_HH__
 
+#include "c-dram/rvv_controller.hh"
 #include "mem/port.hh"
 #include "params/ComputeDRAM.hh"
 #include "sim/sim_object.hh"
@@ -122,6 +123,13 @@ class ComputeDRAM : public SimObject
     };
 
     /**
+     * Handle a packet functionally, first part.
+     *
+     * @return latency
+     */
+    Tick handleUniversal(PacketPtr pkt);
+
+    /**
      * Handle the request from the CPU side
      *
      * @param requesting packet
@@ -174,13 +182,7 @@ class ComputeDRAM : public SimObject
     uint64_t val_rs1;
     uint64_t val_rd;
 
-    uint64_t csr_vstart;
-    uint64_t csr_vcsr;
-    uint64_t csr_vl;
-    uint64_t csr_vtype;
-    uint64_t csr_vlenb;
-
-    std::array<std::vector<uint8_t>, 32> vreg;
+    RISCVVectorController controller;
 
   public:
 
@@ -204,4 +206,4 @@ class ComputeDRAM : public SimObject
 };
 
 
-#endif // __C_DRAM_COMPUTE_DRAM_OBJ_HH__
+#endif // __C_DRAM_COMPUTE_DRAM_HH__
