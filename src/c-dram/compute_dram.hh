@@ -123,6 +123,58 @@ class ComputeDRAM : public SimObject
     };
 
     /**
+     * Port on the memory-side that receives responses.
+     * Mostly just forwards requests to the owner
+     */
+    class MemSidePort : public RequestPort
+    {
+      private:
+        /// The object that owns this object (SimpleMemobj)
+        ComputeDRAM *owner;
+
+        /// If we tried to send a packet and it was blocked, store it here
+        PacketPtr blockedPacket;
+
+      public:
+        /**
+         * Constructor. Just calls the superclass constructor.
+         */
+        MemSidePort(const std::string& name, ComputeDRAM *owner) :
+            RequestPort(name, owner), owner(owner), blockedPacket(nullptr)
+        { }
+
+        /**
+         * Send a packet across this port. This is called by the owner and
+         * all of the flow control is hanled in this function.
+         *
+         * @param packet to send.
+         */
+        void sendPacket(PacketPtr pkt);
+
+      protected:
+        /**
+         * Receive a timing response from the response port.
+         */
+        bool recvTimingResp(PacketPtr pkt) override;
+
+        /**
+         * Called by the response port if sendTimingReq was called on this
+         * request port (causing recvTimingReq to be called on the responder
+         * port) and was unsuccesful.
+         */
+        void recvReqRetry() override;
+
+        /**
+         * Called to receive an address range change from the peer responder
+         * port. The default implementation ignores the change and does
+         * nothing. Override this function in a derived class if the owner
+         * needs to be aware of the address ranges, e.g. in an
+         * interconnect component like a bus.
+         */
+        void recvRangeChange() override;
+    };
+
+    /**
      * Handle a packet functionally, first part.
      *
      * @return latency
@@ -137,6 +189,15 @@ class ComputeDRAM : public SimObject
      *         requestor needs to retry later
      */
     bool handleRequest(PacketPtr pkt);
+
+    /**
+     * Handle the respone from the memory side
+     *
+     * @param responding packet
+     * @return true if we can handle the response this cycle, false if the
+     *         responder needs to retry later
+     */
+    bool handleResponse(PacketPtr pkt);
 
     /**
      * Handle a packet functionally. Update the data on a write and get the
@@ -159,11 +220,14 @@ class ComputeDRAM : public SimObject
     void sendRangeChange();
 
     /// Instantiation of the CPU-side ports
-    CPUSidePort port;
+    CPUSidePort instPort;
+
+    /// Instantiation of the memory-side port
+    MemSidePort dataPort;
 
     PacketPtr processing_pkt;
 
-    void processHandler();
+    bool processHandler(bool functional);
 
     EventFunctionWrapper processEvent;
 

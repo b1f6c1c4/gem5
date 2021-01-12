@@ -34,8 +34,9 @@
 
 ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
     SimObject(params),
-    port(params->name + ".port", this),
-    processEvent([this]{ processHandler(); }, name()),
+    instPort(params->name + ".inst_port", this),
+    dataPort(params->name + ".data_port", this),
+    processEvent([this]{ processHandler(false); }, name()),
     blocked(false),
     state(state_t::IDLE),
     controller(params->parallelism)
@@ -45,8 +46,8 @@ ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
 void
 ComputeDRAM::init()
 {
-    if (port.isConnected()) {
-        port.sendRangeChange();
+    if (instPort.isConnected()) {
+        instPort.sendRangeChange();
     }
 }
 
@@ -57,8 +58,10 @@ ComputeDRAM::getPort(const std::string &if_name, PortID idx)
 
     // This is the name from the Python SimObject declaration
     // (ComputeDRAM.py)
-    if (if_name == "port") {
-        return port;
+    if (if_name == "data_port") {
+        return dataPort;
+    } else if (if_name == "inst_port") {
+        return instPort;
     } else {
         // pass it along to our super class
         return SimObject::getPort(if_name, idx);
@@ -128,6 +131,46 @@ ComputeDRAM::CPUSidePort::recvRespRetry()
     sendPacket(pkt);
 }
 
+void
+ComputeDRAM::MemSidePort::sendPacket(PacketPtr pkt)
+{
+    // Note: This flow control is very simple since the memobj is blocking.
+
+    panic_if(blockedPacket != nullptr, "Should never try to send if blocked!");
+
+    // If we can't send the packet across the port, store it for later.
+    if (!sendTimingReq(pkt)) {
+        blockedPacket = pkt;
+    }
+}
+
+bool
+ComputeDRAM::MemSidePort::recvTimingResp(PacketPtr pkt)
+{
+    // Just forward to the memobj.
+    return owner->handleResponse(pkt);
+}
+
+void
+ComputeDRAM::MemSidePort::recvReqRetry()
+{
+    // We should have a blocked packet if this function is called.
+    assert(blockedPacket != nullptr);
+
+    // Grab the blocked packet.
+    PacketPtr pkt = blockedPacket;
+    blockedPacket = nullptr;
+
+    // Try to resend it. It's possible that it fails again.
+    sendPacket(pkt);
+}
+
+void
+ComputeDRAM::MemSidePort::recvRangeChange()
+{
+    // Do nothing.
+}
+
 bool
 ComputeDRAM::handleRequest(PacketPtr pkt)
 {
@@ -143,18 +186,29 @@ ComputeDRAM::handleRequest(PacketPtr pkt)
     return true;
 }
 
+bool
+ComputeDRAM::handleResponse(PacketPtr pkt)
+{
+    assert(blocked);
+    DPRINTF(ComputeDRAM, "Got response for addr %#x\n", pkt->getAddr());
+
+    schedule(processEvent, curTick() + controller.get_result().time);
+
+    return true;
+}
+
 Tick
 ComputeDRAM::handleUniversal(PacketPtr pkt)
 {
     assert(pkt->getSize() == 8);
 
-    uint32_t cfg_partial = (pkt->getAddr() & 0xff8ull) >> 3u;
+    uint32_t cfg_partial = (pkt->getAddr() & 0x7f8ull) >> 3u;
 
-    uint32_t ticks = 1;
+    Tick ticks = 500;
     switch (state) {
         case state_t::IDLE:
             assert(pkt->isWrite());
-            val_cfg |= cfg_partial << 0u;
+            val_cfg = cfg_partial << 0u;
             pkt->writeData(reinterpret_cast<uint8_t *>(&val_rs2));
             state = state_t::SD1;
             break;
@@ -174,8 +228,9 @@ ComputeDRAM::handleUniversal(PacketPtr pkt)
             assert(pkt->isRead());
             val_cfg |= cfg_partial << 24u;
             state = state_t::LD;
+            DPRINTF(ComputeDRAM, "Decoding instruction of %#.8x\n", val_cfg);
             controller.decode(val_cfg, val_rs2, val_rs1, val_rd);
-            ticks = 1 + controller.get_estimated_time();
+            ticks = controller.get_result().time;
             break;
         default:
             panic("Invalid state");
@@ -188,36 +243,52 @@ ComputeDRAM::handleUniversal(PacketPtr pkt)
     return ticks;
 }
 
-void
-ComputeDRAM::processHandler()
+bool
+ComputeDRAM::processHandler(bool functional)
 {
     auto pkt = processing_pkt;
-
-    blocked = false;
 
     switch (state) {
         case state_t::IDLE:
             panic("Invalid state");
-            break;
+            return false;
         case state_t::SD1:
         case state_t::SD2:
         case state_t::SD3:
+            blocked = false;
             pkt->makeResponse();
-            port.sendPacket(pkt);
-            port.trySendRetry();
+            instPort.sendPacket(pkt);
+            instPort.trySendRetry();
             processing_pkt = nullptr;
-            return;
+            return false;
         case state_t::LD:
             break;
     }
 
-    val_rd = controller.execute();
-    pkt->setData(reinterpret_cast<uint8_t *>(&val_rd));
+    DPRINTF(ComputeDRAM, "Executing instruction\n");
+    controller.execute();
+
+    if (controller.get_result().pkt) { // pending memory request
+        DPRINTF(ComputeDRAM, "Sending memory request\n");
+        if (functional) {
+            dataPort.sendFunctional(controller.get_result().pkt);
+        } else {
+            dataPort.sendPacket(controller.get_result().pkt);
+        }
+        return true;
+    }
+
+    // all finished
+    DPRINTF(ComputeDRAM, "Finalizing instruction\n");
+    blocked = false;
+    auto v = &controller.get_result().rd;
+    pkt->setData(reinterpret_cast<const uint8_t *>(v));
     pkt->makeResponse();
-    port.sendPacket(pkt);
-    port.trySendRetry();
+    instPort.sendPacket(pkt);
+    instPort.trySendRetry();
     state = state_t::IDLE;
     processing_pkt = nullptr;
+    return false;
 }
 
 void
@@ -226,7 +297,7 @@ ComputeDRAM::handleFunctional(PacketPtr pkt)
     DPRINTF(ComputeDRAM, "Got functional for addr %#x\n", pkt->getAddr());
 
     handleUniversal(pkt);
-    processHandler();
+    while (processHandler(true));
 }
 
 AddrRangeList
@@ -239,7 +310,7 @@ ComputeDRAM::getAddrRanges() const
 void
 ComputeDRAM::sendRangeChange()
 {
-    port.sendRangeChange();
+    instPort.sendRangeChange();
 }
 
 

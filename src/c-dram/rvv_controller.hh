@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <vector>
 #include "c-dram/mem_row_t.hh"
+#include "mem/packet.hh"
 
 #define SLEN 32
 
@@ -40,16 +41,31 @@ class RISCVVectorController
 {
   private:
 
+    uint64_t vlen;
+
     typedef std::array<mem_row_t, SLEN> reg_t;
 
-    uint64_t csr_vstart = 0ull;
-    uint64_t csr_vcsr = 0ull;
-    uint64_t csr_vl = 0ull;
-    uint64_t csr_vtype = 0ull;
-    uint64_t csr_vlenb = 0ull;
+    uint64_t csr_vstart = 0ull; // 0x008, URW
+    uint64_t csr_vxsat = 0ull;  // 0x009, URW
+    uint64_t csr_vxrm = 0ull;   // 0x00a, URW
+    uint64_t csr_vcsr = 0ull;   // 0x00f, URW
+    uint64_t csr_vl = 0ull;     // 0xc20, URO
+    uint64_t csr_vtype = 0ull;  // 0xc21, URO
+    uint64_t csr_vlenb;         // 0xc22, URO
 
     std::array<reg_t, 32> vreg;
     std::vector<mem_row_t> id;
+
+    enum class state_t {
+        IDLE,
+        // TODO
+    } state;
+
+    struct result_t {
+        Tick time;
+        PacketPtr pkt;
+        uint64_t rd;
+    } result;
 
   public:
 
@@ -57,11 +73,12 @@ class RISCVVectorController
 
     void decode(uint32_t instr, uint64_t rs2, uint64_t rs1, uint64_t rd);
 
-    uint32_t get_estimated_time() const;
+    void execute();
 
-    uint32_t get_estimated_power() const;
+    [[nodiscard]] const result_t &get_result() const { return result; }
 
-    uint64_t execute();
+  private:
+
 };
 
 

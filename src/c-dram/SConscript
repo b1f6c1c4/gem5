@@ -35,3 +35,4 @@ Source('mem_row_t.cc')
 Source('rvv_controller.cc')
 
 DebugFlag('ComputeDRAM')
+DebugFlag('RVV')
