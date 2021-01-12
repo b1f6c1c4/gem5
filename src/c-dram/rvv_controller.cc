@@ -31,8 +31,76 @@
 #include <cmath>
 #include "base/trace.hh"
 #include "debug/RVV.hh"
+#include "mem/packet_access.hh"
 
 #define FANCY 0x1145141919810233ull
+
+template <typename T, size_t N>
+T from_bitset(const std::bitset<N> &bs) {
+    // TODO: Optimize performance
+    T v{};
+    for (size_t i{}; i < N; i++)
+        if (bs[i])
+            v |= (1ull << i);
+    return v;
+}
+
+template <typename T, size_t N>
+void to_bitset(std::bitset<N> &bs, T v) {
+    // TODO: Optimize performance
+    for (size_t i{}; i < N; i++)
+        bs[i] = v & (1ull << i);
+}
+
+RISCVVectorController::logic_elem_t::operator elem_t() const {
+    elem_t v{};
+    for (uint_fast16_t i{}; i < p->ew; i++)
+        v.bs[i] = (*this)[i];
+    v.u8 = from_bitset<uint8_t>(v.bs);
+    v.u16 = from_bitset<uint16_t>(v.bs);
+    v.u32 = from_bitset<uint32_t>(v.bs);
+    v.u64 = from_bitset<uint64_t>(v.bs);
+    return v;
+}
+
+RISCVVectorController::logic_elem_t &
+RISCVVectorController::logic_elem_t::operator=(elem_t v) {
+    switch (p->ew) {
+        case 8:
+            to_bitset(v.bs, v.u8);
+            break;
+        case 16:
+            to_bitset(v.bs, v.u16);
+            break;
+        case 32:
+            to_bitset(v.bs, v.u32);
+            break;
+        case 64:
+            to_bitset(v.bs, v.u64);
+            break;
+        default:
+            break;
+    }
+    for (uint_fast16_t i{}; i < p->ew; i++)
+        (*this)[i] = v.bs[i];
+    return *this;
+}
+
+mem_row_t::assigner
+RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
+    auto i = id * p->ew * b;
+    auto piece = i / SLEN;
+    auto offset = i % SLEN;
+    uint16_t mul;
+    if (p->lmul >= 1.0)
+        mul = p->lmul;
+    else
+        mul = 1u;
+    auto shift = piece / mul;
+    auto reg = piece % mul;
+    auto &r = p->r[reg];
+    return r[offset][shift];
+}
 
 constexpr bool vma(uint64_t vtype) {
     return vtype & 0x80ull;
@@ -50,14 +118,14 @@ constexpr uint64_t SEW(uint64_t vtype) {
     return 8ull << ((vtype & 0x1cull) >> 2u);
 }
 
-RISCVVectorController::RISCVVectorController(uint64_t vlen,
+RISCVVectorController::RISCVVectorController(uint64_t par,
         RequestorID reqId) :
     requestorId{reqId},
-    VLEN{vlen},
-    csr_vlenb{vlen / 8},
+    VLEN{SLEN * par},
+    csr_vlenb{VLEN / 8},
     state{state_t::IDLE}
 {
-    DPRINTF(RVV, "VLEN set to %x\n", VLEN);
+    DPRINTF(RVV, "VLEN set to %d\n", VLEN);
     for (auto &reg : vreg)
         for (auto &r : reg)
             r = std::move(mem_row_t::from(0ull, VLEN));
@@ -78,6 +146,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
     auto major_opcode = instr & 0x0000007ful;
     bool mew = funct6 & 0x08u;
     auto mop = (funct6 & 0x06u) >> 1u;
+    auto EMUL = LMUL(csr_vtype);
     switch (major_opcode) {
         case 0x07u: // Vector Load Instructions under LOAD-FP major opcode
         case 0x27u: // Vector Store Instructions under STORE-FP major opcode
@@ -85,7 +154,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             vm = funct6 & 0x01u;
             panic_if(width >= 1u && width <= 4u,
                     "Vector Load/Store with invalid width");
-            EEW = 8ul << ((width & 3u) | (mew ? 4u : 0u));
+            EEW = 8u << ((width & 3u) | (mew ? 4u : 0u));
             panic_if(EEW > ELEN, "EEW=%d larger then ELEN=%d", EEW, ELEN);
             evl = csr_vl;
             switch (mop) {
@@ -98,6 +167,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                         case 0x08u: // unit-stride, whole registers
                             mem_op = WHOLE_REGISTERS;
                             EEW = 8u;
+                            EMUL = 1.0;
                             evl = VLEN / EEW;
                             break;
                         case 0x10u: // unit-stride fault-only-first
@@ -126,7 +196,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             panic_if(nf != 0u, "Segment Load/Store (Zvlsseg) not implemented");
             panic_if(vm, "Masked Load/Store not implemented");
             base_address = rs1;
-            op_src_dest = op_d;
+            view = {&vreg[op_d], EMUL, EEW};
             state = major_opcode == 0x27u
                 ? state_t::MEM_STORE : state_t::MEM_LOAD;
             result = { 500, nullptr, FANCY };
@@ -134,7 +204,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
         case 0x57u:
             if (width != 0x7u) {
                 // Vector Arithmetic Instructions under OP-V major opcode
-                panic("Vector Arithmetic not implemented");
+                // TODO: panic("Vector Arithmetic not implemented");
             } else {
                 // Vector Configuration Instructions under OP-V major opcode
                 uint16_t zimm;
@@ -151,10 +221,12 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                 else // if (op_1 != 0u)
                     AVL = rs1; // Normal stripmining
 
+                DPRINTF(RVV, "vsetvl[i]: vtype=%#x LMUL=%f SEW=%d\n",
+                        zimm, LMUL(zimm), SEW(zimm));
+
                 uint64_t VLMAX = LMUL(zimm) * VLEN / SEW(zimm);
 
-                DPRINTF(RVV, "vsetvl[i]: vtype=%#x AVL=%d VLMAX=%d\n",
-                        zimm, AVL, VLMAX);
+                DPRINTF(RVV, "vsetvl[i]: AVL=%d VLMAX=%d\n", AVL, VLMAX);
 
                 csr_vtype = zimm;
 
@@ -174,10 +246,10 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             panic("Vector AMO not implemented");
             break;
         default:
-            panic("Invalid major opcode %#.2x", major_opcode);
+            panic("Invalid major opcode %#.4x", major_opcode);
             break;
     }
-    DPRINTF(RVV, "result.time=%d pkt=%p rd=%#.16x\n",
+    DPRINTF(RVV, "result.time=%d pkt=%p rd=%#.18x\n",
             result.time, result.pkt, result.rd);
 }
 
@@ -194,29 +266,76 @@ RISCVVectorController::execute() {
 
             if (result.pkt) {
                 // if (mem_op == FAULT_ONLY_FIRST)
-                // TODO
+                if (state == state_t::MEM_LOAD) {
+                    elem_t b{};
+                    switch (EEW) {
+#define TRY_ELEM(N, Q) \
+                        case N: \
+                            b.u ## N = result.pkt->getLE<uint ## N ## _t>(); \
+                            DPRINTF(RVV, "Write: v%d[%d] <- %#." #Q "x\n", \
+                                    view.r - vreg.data(), \
+                                    csr_vstart, b.u ## N); \
+                            break
+                        TRY_ELEM(8, 4);
+                        TRY_ELEM(16, 6);
+                        TRY_ELEM(32, 10);
+                        TRY_ELEM(64, 18);
+#undef TRY_ELEM
+                        default:
+                            b.bs = result.pkt->getLE<std::bitset<ELEN>>();
+                            DPRINTF(RVV, "Write: v%d[%d] <- %#x\n",
+                                    view.r - vreg.data(),
+                                    csr_vstart, b.bs);
+                            break;
+                    }
+                    view[csr_vstart] = b;
+                }
+                csr_vstart++;
             }
 
             req = nullptr;
             delete result.pkt;
             result = { 500, nullptr, FANCY };
 
-            if (csr_vstart >= evl)
+            if (csr_vstart >= evl) {
+                state = state_t::IDLE;
+                csr_vstart = 0u;
                 return;
+            }
 
-            auto addr = base_address + stride * csr_vstart++;
-            auto size = EEW / 8;
+            auto addr = base_address + stride * csr_vstart;
+            auto size = EEW / 8u;
             req = std::make_shared<Request>(addr, size, 0ull, requestorId);
             if (state == state_t::MEM_LOAD) {
                 DPRINTF(RVV, "Request Load for addr=%#x size=%d\n",
                         addr, size);
                 result.pkt = Packet::createRead(req);
+                result.pkt->allocate();
             } else {
                 DPRINTF(RVV, "Request Store for addr=%#x size=%d\n",
                         addr, size);
                 result.pkt = Packet::createWrite(req);
+                result.pkt->allocate();
+                elem_t b = view[csr_vstart];
+                switch (EEW) {
+#define TRY_ELEM(N, Q) \
+                    case N: \
+                        result.pkt->setLE(b.u ## N); \
+                        DPRINTF(RVV, "Read: v%d[%d] -> %#." #Q "x\n", \
+                                view.r - vreg.data(), csr_vstart, b.u ## N); \
+                        break
+                    TRY_ELEM(8, 4);
+                    TRY_ELEM(16, 6);
+                    TRY_ELEM(32, 10);
+                    TRY_ELEM(64, 18);
+#undef TRY_ELEM
+                    default:
+                        result.pkt->setLE(b.bs); \
+                        DPRINTF(RVV, "Read: v%d[%d] -> %#x\n",
+                                view.r - vreg.data(), csr_vstart, b.bs);
+                        break;
+                }
             }
-            result.pkt->dataStatic(&buffer);
             return;
     }
 }

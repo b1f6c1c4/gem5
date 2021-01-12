@@ -230,7 +230,7 @@ ComputeDRAM::handleUniversal(PacketPtr pkt)
             assert(pkt->isRead());
             val_cfg |= cfg_partial << 24u;
             state = state_t::LD;
-            DPRINTF(ComputeDRAM, "Decoding instruction of %#.8x\n", val_cfg);
+            DPRINTF(ComputeDRAM, "Decoding instruction of %#.10x\n", val_cfg);
             controller.decode(val_cfg, val_rs2, val_rs1, val_rd);
             ticks = controller.get_result().time;
             break;

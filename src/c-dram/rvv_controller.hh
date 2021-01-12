@@ -30,14 +30,15 @@
 #define __C_DRAM_RVV_CONTROLLER_HH__
 
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <vector>
 #include "c-dram/mem_row_t.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 
-#define SLEN 32ull
-#define ELEN 32ull
+#define SLEN 32u
+#define ELEN 32u
 
 class RISCVVectorController
 {
@@ -45,8 +46,6 @@ class RISCVVectorController
 
     RequestorID requestorId;
     uint64_t VLEN;
-
-    typedef std::array<mem_row_t, SLEN> reg_t;
 
     uint64_t csr_vstart = 0ull; // 0x008, URW
     uint64_t csr_vxsat = 0ull;  // 0x009, URW
@@ -56,7 +55,42 @@ class RISCVVectorController
     uint64_t csr_vtype = 0ull;  // 0xc21, URO
     uint64_t csr_vlenb;         // 0xc22, URO
 
-    std::array<reg_t, 32> vreg;
+    typedef std::array<mem_row_t, SLEN> reg_t;
+    typedef std::array<reg_t, 32> reg_file_t;
+
+    struct elem_t {
+        union {
+            uint8_t u8;
+            uint16_t u16;
+            uint32_t u32;
+            uint64_t u64;
+        };
+        std::bitset<ELEN> bs;
+    };
+
+    struct logic_reg_t;
+    struct logic_elem_t {
+        logic_reg_t *p;
+        uint64_t id;
+
+        [[nodiscard]] operator elem_t() const;
+        logic_elem_t &operator=(elem_t v);
+
+      private:
+        mem_row_t::assigner operator[](uint16_t b) const;
+    };
+
+    struct logic_reg_t {
+        reg_t *r;
+        double lmul;
+        uint16_t ew;
+
+        [[nodiscard]] logic_elem_t operator[](uint64_t id) {
+            return {this, id};
+        }
+    };
+
+    reg_file_t vreg;
     std::vector<mem_row_t> id;
 
     enum class state_t {
@@ -73,7 +107,7 @@ class RISCVVectorController
 
   public:
 
-    RISCVVectorController(uint64_t vlen, RequestorID reqId);
+    RISCVVectorController(uint64_t par, RequestorID reqId);
 
     void decode(uint32_t instr, uint64_t rs2, uint64_t rs1, uint64_t rd);
 
@@ -87,8 +121,8 @@ class RISCVVectorController
     uint64_t base_address;
     int64_t stride;
     uint16_t op_address_offset;
-    uint16_t op_src_dest;
-    uint32_t EEW;
+    logic_reg_t view;
+    uint16_t EEW;
     uint16_t nf;
     uint64_t evl;
     bool vm;
@@ -100,7 +134,6 @@ class RISCVVectorController
         STRIDED,
         INDEXED,
     } mem_op;
-    uint64_t buffer;
 };
 
 #endif // __C_DRAM_RVV_CONTROLLER_HH__
