@@ -34,14 +34,17 @@
 #include <vector>
 #include "c-dram/mem_row_t.hh"
 #include "mem/packet.hh"
+#include "mem/request.hh"
 
-#define SLEN 32
+#define SLEN 32ull
+#define ELEN 32ull
 
 class RISCVVectorController
 {
   private:
 
-    uint64_t vlen;
+    RequestorID requestorId;
+    uint64_t VLEN;
 
     typedef std::array<mem_row_t, SLEN> reg_t;
 
@@ -58,7 +61,8 @@ class RISCVVectorController
 
     enum class state_t {
         IDLE,
-        // TODO
+        MEM_LOAD,
+        MEM_STORE,
     } state;
 
     struct result_t {
@@ -69,7 +73,7 @@ class RISCVVectorController
 
   public:
 
-    RISCVVectorController(uint64_t vlen);
+    RISCVVectorController(uint64_t vlen, RequestorID reqId);
 
     void decode(uint32_t instr, uint64_t rs2, uint64_t rs1, uint64_t rd);
 
@@ -79,7 +83,24 @@ class RISCVVectorController
 
   private:
 
+    // Memory Access
+    uint64_t base_address;
+    int64_t stride;
+    uint16_t op_address_offset;
+    uint16_t op_src_dest;
+    uint32_t EEW;
+    uint16_t nf;
+    uint64_t evl;
+    bool vm;
+    RequestPtr req;
+    enum {
+        UNIT_STRIDE,
+        WHOLE_REGISTERS,
+        FAULT_ONLY_FIRST,
+        STRIDED,
+        INDEXED,
+    } mem_op;
+    uint64_t buffer;
 };
-
 
 #endif // __C_DRAM_RVV_CONTROLLER_HH__

@@ -31,15 +31,17 @@
 
 #include "base/trace.hh"
 #include "debug/ComputeDRAM.hh"
+#include "mem/request.hh"
+#include "sim/system.hh"
 
 ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
-    SimObject(params),
-    instPort(params->name + ".inst_port", this),
-    dataPort(params->name + ".data_port", this),
-    processEvent([this]{ processHandler(false); }, name()),
-    blocked(false),
-    state(state_t::IDLE),
-    controller(params->parallelism)
+    SimObject{params},
+    instPort{params->name + ".inst_port", this},
+    dataPort{params->name + ".data_port", this},
+    processEvent{[this]{ processHandler(false); }, name()},
+    blocked{false},
+    state{state_t::IDLE},
+    controller{params->parallelism, params->sys->getRequestorId(this, "data")}
 {
 }
 

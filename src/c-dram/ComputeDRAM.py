@@ -26,8 +26,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from m5.params import *
 from m5.SimObject import SimObject
+from m5.params import *
+from m5.proxy import *
 
 class ComputeDRAM(SimObject):
     type = 'ComputeDRAM'
@@ -36,4 +37,5 @@ class ComputeDRAM(SimObject):
     inst_port = ResponsePort("This port receives instructions")
     data_port = RequestPort("This port send request to memory")
 
-    parallelism = Param.Int(262144, "Number of DRAM columns affected")
+    sys = Param.System(Parent.any, "System it belongs to")
+    parallelism = Param.UInt64(262144, "Number of DRAM columns affected")
