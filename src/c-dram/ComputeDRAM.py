@@ -34,3 +34,4 @@ class ComputeDRAM(SimObject):
     cxx_header = "c-dram/compute_dram.hh"
 
     port = ResponsePort("This port sends responses and receives requests")
+    parallelism = Param.Int(262144, "Number of DRAM columns affected")

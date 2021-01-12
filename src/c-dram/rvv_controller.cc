@@ -28,6 +28,17 @@
 
 #include "c-dram/rvv_controller.hh"
 
+#include <cmath>
+
+RISCVVectorController::RISCVVectorController(uint64_t vlen) {
+    for (auto &reg : vreg)
+        for (auto &r : reg)
+            r = std::move(mem_row_t::from(0ull, vlen));
+    auto ids = static_cast<size_t>(std::log2(vlen));
+    for (size_t i{}; i < ids; i++)
+        id.emplace_back(std::move(mem_row_t::interleaved(i, vlen)));
+}
+
 void
 RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
         uint64_t rs1, uint64_t rd) {

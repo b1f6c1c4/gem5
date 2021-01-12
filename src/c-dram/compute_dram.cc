@@ -37,7 +37,8 @@ ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
     port(params->name + ".port", this),
     processEvent([this]{ processHandler(); }, name()),
     blocked(false),
-    state(state_t::IDLE)
+    state(state_t::IDLE),
+    controller(params->parallelism)
 {
 }
 

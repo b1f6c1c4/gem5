@@ -32,10 +32,15 @@
 #include <array>
 #include <cstdint>
 #include <vector>
+#include "c-dram/mem_row_t.hh"
+
+#define SLEN 32
 
 class RISCVVectorController
 {
   private:
+
+    typedef std::array<mem_row_t, SLEN> reg_t;
 
     uint64_t csr_vstart = 0ull;
     uint64_t csr_vcsr = 0ull;
@@ -43,9 +48,12 @@ class RISCVVectorController
     uint64_t csr_vtype = 0ull;
     uint64_t csr_vlenb = 0ull;
 
-    std::array<std::vector<uint8_t>, 32> vreg;
+    std::array<reg_t, 32> vreg;
+    std::vector<mem_row_t> id;
 
   public:
+
+    RISCVVectorController(uint64_t vlen);
 
     void decode(uint32_t instr, uint64_t rs2, uint64_t rs1, uint64_t rd);
 
