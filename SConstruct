@@ -235,6 +235,7 @@ global_vars.AddVariables(
     ('BATCH', 'Use batch pool for build and tests', False),
     ('BATCH_CMD', 'Batch pool submission command name', 'qdo'),
     ('M5_BUILD_CACHE', 'Cache built objects in this directory', False),
+    ('RVV', 'Path to librvv', ''),
     ('EXTRAS', 'Add extra directories to the compilation', '')
     )
 
@@ -1011,6 +1012,9 @@ Build variables for {dir}:
 
     if env['EFENCE']:
         env.Append(LIBS=['efence'])
+
+    if env['RVV']:
+        env.Append(LIBS=['rvv'], LIBPATH=[env['RVV']])
 
     if env['USE_KVM']:
         if not have_kvm:

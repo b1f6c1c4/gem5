@@ -99,7 +99,7 @@ RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
     auto shifts = piece / mul;
     auto col = shifts / 64u;
     auto shift = shifts % 64u;
-    auto c = (*p->mem)[col];
+    auto &c = (*p->mem)[col];
     auto reg = piece % mul;
     return { &c.v[reg][offset], shift };
 }
@@ -128,7 +128,7 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
     state{state_t::IDLE}
 {
     DPRINTF(RVV, "VLEN set to %d\n", VLEN);
-    auto n = par / 64;
+    auto n = (par + 63u) / 64u;
     mem.resize(n);
     auto ids = static_cast<size_t>(std::log2(VLEN));
     for (size_t c{}; c < n; c++) {
@@ -221,7 +221,43 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
         case 0x57u:
             if (width != 0x7u) {
                 // Vector Arithmetic Instructions under OP-V major opcode
-                // TODO: panic("Vector Arithmetic not implemented");
+                rcx.instr = instr;
+                rcx.rs1 = rs1;
+                rcx.rd = rd;
+                rcx.rf = nullptr;
+                rcx.id = nullptr;
+                rcx.vl = csr_vl;
+                rcx.vstart = csr_vstart;
+                rcx.vxrm = csr_vxrm;
+                rcx.SEW = SEW(csr_vtype);
+                rcx.LMUL = EMUL;
+                switch (librvv_decode(&rcx, &dcx)) {
+                    case ERR_NO:
+                        break;
+                    case ERR_INVALID_FUNCT3:
+                        panic("librvv: ERR_INVALID_FUNCT3");
+                        break;
+                    case ERR_INVALID_FUNCT6:
+                        panic("librvv: ERR_INVALID_FUNCT6");
+                        break;
+                    case ERR_INVALID_NODE_TYPE:
+                        panic("librvv: ERR_INVALID_NODE_TYPE");
+                        break;
+                    case ERR_USE_DISABLED_OP_1:
+                        panic("librvv: ERR_USE_DISABLED_OP_1");
+                        break;
+                    case ERR_INVALID_LMUL:
+                        panic("librvv: ERR_INVALID_LMUL");
+                        break;
+                    case ERR_INVALID_SEW:
+                        panic("librvv: ERR_INVALID_SEW");
+                        break;
+                    default:
+                        panic("librvv: Unknown error");
+                        break;
+                }
+                state = state_t::ARITH;
+                result = { 500 + dcx.time_cost, nullptr, FANCY };
             } else {
                 // Vector Configuration Instructions under OP-V major opcode
                 uint16_t zimm;
@@ -275,6 +311,15 @@ RISCVVectorController::execute() {
     switch (state) {
         case state_t::IDLE:
             // do nothing
+            return;
+
+        case state_t::ARITH:
+            for (size_t i{}; i < mem.size(); i++) {
+                DPRINTF(RVV, "Executing column %d\n", i);
+                rcx.rf = &mem[i].v[0][0];
+                rcx.id = &mem[i].id[0];
+                librvv_execute(&rcx, &dcx);
+            }
             return;
 
         case state_t::MEM_LOAD:

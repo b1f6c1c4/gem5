@@ -114,6 +114,7 @@ class RISCVVectorController
 
     enum class state_t {
         IDLE,
+        ARITH,
         MEM_LOAD,
         MEM_STORE,
     } state;
@@ -153,6 +154,10 @@ class RISCVVectorController
         STRIDED,
         INDEXED,
     } mem_op;
+
+    // Arithmetic
+    rvv_ctx rcx;
+    decoded_ctx dcx;
 };
 
 #endif // __C_DRAM_RVV_CONTROLLER_HH__
