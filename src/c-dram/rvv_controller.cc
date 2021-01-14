@@ -86,7 +86,7 @@ RISCVVectorController::logic_elem_t::operator=(elem_t v) {
     return *this;
 }
 
-mem_row_t::assigner
+RISCVVectorController::logic_elem_t::pos_t
 RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
     auto i = id * p->ew * b;
     auto piece = i / SLEN;
@@ -96,10 +96,12 @@ RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
         mul = p->lmul;
     else
         mul = 1u;
-    auto shift = piece / mul;
+    auto shifts = piece / mul;
+    auto col = shifts / 64u;
+    auto shift = shifts % 64u;
+    auto c = (*p->mem)[col];
     auto reg = piece % mul;
-    auto &r = p->r[reg];
-    return r[offset][shift];
+    return { &c.v[reg][offset], shift };
 }
 
 constexpr bool vma(uint64_t vtype) {
@@ -126,12 +128,27 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
     state{state_t::IDLE}
 {
     DPRINTF(RVV, "VLEN set to %d\n", VLEN);
-    for (auto &reg : vreg)
-        for (auto &r : reg)
-            r = std::move(mem_row_t::from(0ull, VLEN));
+    auto n = par / 64;
+    mem.resize(n);
     auto ids = static_cast<size_t>(std::log2(VLEN));
-    for (size_t i{}; i < ids; i++)
-        id.emplace_back(std::move(mem_row_t::interleaved(i, VLEN)));
+    for (size_t c{}; c < n; c++) {
+        mem[c].id.reserve(ids);
+        size_t i{};
+        if (i++ < ids)
+            mem[c].id.push_back( 0xaaaaaaaaaaaaaaaaull);
+        if (i++ < ids)
+            mem[c].id.push_back( 0xccccccccccccccccull);
+        if (i++ < ids)
+            mem[c].id.push_back( 0xf0f0f0f0f0f0f0f0ull);
+        if (i++ < ids)
+            mem[c].id.push_back( 0xff00ff00ff00ff00ull);
+        if (i++ < ids)
+            mem[c].id.push_back( 0xffff0000ffff0000ull);
+        if (i++ < ids)
+            mem[c].id.push_back( 0xffffffff00000000ull);
+        for (; i < ids; i++)
+            mem[c].id.push_back((c & (0x1ull << (i - 6ull))) ? ~0ull : 0ull);
+    }
 }
 
 void
@@ -196,7 +213,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             panic_if(nf != 0u, "Segment Load/Store (Zvlsseg) not implemented");
             panic_if(vm, "Masked Load/Store not implemented");
             base_address = rs1;
-            view = {&vreg[op_d], EMUL, EEW};
+            view = {&mem, EMUL, EEW, static_cast<uint16_t>(op_d)};
             state = major_opcode == 0x27u
                 ? state_t::MEM_STORE : state_t::MEM_LOAD;
             result = { 500, nullptr, FANCY };
@@ -273,8 +290,7 @@ RISCVVectorController::execute() {
                         case N: \
                             b.u ## N = result.pkt->getLE<uint ## N ## _t>(); \
                             DPRINTF(RVV, "Write: v%d[%d] <- %#." #Q "x\n", \
-                                    view.r - vreg.data(), \
-                                    csr_vstart, b.u ## N); \
+                                    view.rid, csr_vstart, b.u ## N); \
                             break
                         TRY_ELEM(8, 4);
                         TRY_ELEM(16, 6);
@@ -284,8 +300,7 @@ RISCVVectorController::execute() {
                         default:
                             b.bs = result.pkt->getLE<std::bitset<ELEN>>();
                             DPRINTF(RVV, "Write: v%d[%d] <- %#x\n",
-                                    view.r - vreg.data(),
-                                    csr_vstart, b.bs);
+                                    view.rid, csr_vstart, b.bs);
                             break;
                     }
                     view[csr_vstart] = b;
@@ -322,7 +337,7 @@ RISCVVectorController::execute() {
                     case N: \
                         result.pkt->setLE(b.u ## N); \
                         DPRINTF(RVV, "Read: v%d[%d] -> %#." #Q "x\n", \
-                                view.r - vreg.data(), csr_vstart, b.u ## N); \
+                                view.rid, csr_vstart, b.u ## N); \
                         break
                     TRY_ELEM(8, 4);
                     TRY_ELEM(16, 6);
@@ -332,7 +347,7 @@ RISCVVectorController::execute() {
                     default:
                         result.pkt->setLE(b.bs); \
                         DPRINTF(RVV, "Read: v%d[%d] -> %#x\n",
-                                view.r - vreg.data(), csr_vstart, b.bs);
+                                view.rid, csr_vstart, b.bs);
                         break;
                 }
             }

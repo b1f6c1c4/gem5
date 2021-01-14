@@ -33,7 +33,7 @@
 #include <bitset>
 #include <cstdint>
 #include <vector>
-#include "c-dram/mem_row_t.hh"
+#include "../../../rvv_impl.h"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 
@@ -55,8 +55,11 @@ class RISCVVectorController
     uint64_t csr_vtype = 0ull;  // 0xc21, URO
     uint64_t csr_vlenb;         // 0xc22, URO
 
-    typedef std::array<mem_row_t, SLEN> reg_t;
-    typedef std::array<reg_t, 32> reg_file_t;
+    struct column_t {
+        typedef std::array<uint64_t, SLEN> reg_t;
+        std::array<reg_t, 32> v;
+        std::vector<uint64_t> id;
+    };
 
     struct elem_t {
         union {
@@ -77,21 +80,37 @@ class RISCVVectorController
         logic_elem_t &operator=(elem_t v);
 
       private:
-        mem_row_t::assigner operator[](uint16_t b) const;
+        struct pos_t {
+            uint64_t *ref;
+            uint64_t shift;
+
+            [[nodiscard]] operator bool() const {
+                return *ref & (1ull << shift);
+            }
+            pos_t &operator=(bool v) {
+                if (v)
+                    *ref |= 1ull << shift;
+                else
+                    *ref &= ~(1ull << shift);
+                return *this;
+            }
+        };
+
+        pos_t operator[](uint16_t b) const;
     };
 
     struct logic_reg_t {
-        reg_t *r;
+        std::vector<column_t> *mem;
         double lmul;
         uint16_t ew;
+        uint16_t rid;
 
         [[nodiscard]] logic_elem_t operator[](uint64_t id) {
             return {this, id};
         }
     };
 
-    reg_file_t vreg;
-    std::vector<mem_row_t> id;
+    std::vector<column_t> mem;
 
     enum class state_t {
         IDLE,
