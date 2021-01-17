@@ -133,6 +133,8 @@ class RISCVVectorController
 
     void execute();
 
+    void set_response(PacketPtr pkt) { result.pkt = pkt; }
+
     [[nodiscard]] const result_t &get_result() const { return result; }
 
   private:

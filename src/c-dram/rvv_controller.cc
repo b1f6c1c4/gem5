@@ -125,13 +125,12 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
     requestorId{reqId},
     VLEN{SLEN * par},
     csr_vlenb{VLEN / 8},
+    mem{(par + 63u) / 64u},
     state{state_t::IDLE}
 {
     DPRINTF(RVV, "VLEN set to %d\n", VLEN);
-    auto n = (par + 63u) / 64u;
-    mem.resize(n);
-    auto ids = static_cast<size_t>(std::log2(VLEN));
-    for (size_t c{}; c < n; c++) {
+    auto ids = static_cast<size_t>(std::log2(par));
+    for (size_t c{}; c < mem.size(); c++) {
         mem[c].id.reserve(ids);
         size_t i{};
         if (i++ < ids)
@@ -320,6 +319,7 @@ RISCVVectorController::execute() {
                 rcx.id = &mem[i].id[0];
                 librvv_execute(&rcx, &dcx);
             }
+            state = state_t::IDLE;
             return;
 
         case state_t::MEM_LOAD:

@@ -194,6 +194,7 @@ ComputeDRAM::handleResponse(PacketPtr pkt)
     assert(blocked);
     DPRINTF(ComputeDRAM, "Got response for addr %#x\n", pkt->getAddr());
 
+    controller.set_response(pkt);
     schedule(processEvent, curTick() + controller.get_result().time);
 
     return true;
