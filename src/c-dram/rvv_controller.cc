@@ -364,6 +364,7 @@ RISCVVectorController::execute() {
             }
 
             auto addr = base_address + stride * csr_vstart;
+            addr -= 0x10000ull; // FIXME: actually translate this
             auto size = EEW / 8u;
             req = std::make_shared<Request>(addr, size, 0ull, requestorId);
             if (state == state_t::MEM_LOAD) {
