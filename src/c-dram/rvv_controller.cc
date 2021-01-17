@@ -88,7 +88,7 @@ RISCVVectorController::logic_elem_t::operator=(elem_t v) {
 
 RISCVVectorController::logic_elem_t::pos_t
 RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
-    auto i = id * p->ew * b;
+    auto i = id * p->ew + b;
     auto piece = i / SLEN;
     auto offset = i % SLEN;
     uint16_t mul;
@@ -100,7 +100,7 @@ RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
     auto col = shifts / 64u;
     auto shift = shifts % 64u;
     auto &c = (*p->mem)[col];
-    auto reg = piece % mul;
+    auto reg = p->rid + piece % mul;
     return { &c.v[reg][offset], shift };
 }
 
