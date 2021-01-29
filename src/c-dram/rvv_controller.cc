@@ -35,6 +35,8 @@
 
 #define FANCY 0x1145141919810233ull
 
+EmulationPageTable *g_rvv_controller_mmap{};
+
 template <typename T, size_t N>
 T from_bitset(const std::bitset<N> &bs) {
     // TODO: Optimize performance
@@ -363,18 +365,23 @@ RISCVVectorController::execute() {
                 return;
             }
 
-            auto addr = base_address + stride * csr_vstart;
-            addr -= 0x10000ull; // FIXME: actually translate this
+            Addr vaddr = base_address + stride * csr_vstart;
+            Addr paddr;
             auto size = EEW / 8u;
-            req = std::make_shared<Request>(addr, size, 0ull, requestorId);
+            panic_if(!g_rvv_controller_mmap, "No mmap found");
+            if (!g_rvv_controller_mmap->translate(vaddr, paddr)) {
+                panic("Request Untranslatable for vaddr=%#x paddr=%#x size=%d\n",
+                        vaddr, paddr, size);
+            }
+            req = std::make_shared<Request>(paddr, size, 0ull, requestorId);
             if (state == state_t::MEM_LOAD) {
-                DPRINTF(RVV, "Request Load for addr=%#x size=%d\n",
-                        addr, size);
+                DPRINTF(RVV, "Request Load for vaddr=%#x paddr=%#x size=%d\n",
+                        vaddr, paddr, size);
                 result.pkt = Packet::createRead(req);
                 result.pkt->allocate();
             } else {
-                DPRINTF(RVV, "Request Store for addr=%#x size=%d\n",
-                        addr, size);
+                DPRINTF(RVV, "Request Store for vaddr=%#x paddr=%#x size=%d\n",
+                        vaddr, paddr, size);
                 result.pkt = Packet::createWrite(req);
                 result.pkt->allocate();
                 elem_t b = view[csr_vstart];

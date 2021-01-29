@@ -157,6 +157,9 @@ Process::Process(const ProcessParams &params, EmulationPageTable *pTable,
 
     if (::Loader::debugSymbolTable.empty())
         ::Loader::debugSymbolTable = objFile->symtab();
+
+    extern EmulationPageTable *g_rvv_controller_mmap;
+    g_rvv_controller_mmap = pTable;
 }
 
 void
