@@ -32,6 +32,7 @@
 #include "base/trace.hh"
 #include "debug/RVV.hh"
 #include "mem/packet_access.hh"
+#include "mem/page_table.hh"
 
 #define FANCY 0x1145141919810233ull
 
@@ -39,7 +40,6 @@ EmulationPageTable *g_rvv_controller_mmap{};
 
 template <typename T, size_t N>
 T from_bitset(const std::bitset<N> &bs) {
-    // TODO: Optimize performance
     T v{};
     for (size_t i{}; i < N; i++)
         if (bs[i])
@@ -47,11 +47,21 @@ T from_bitset(const std::bitset<N> &bs) {
     return v;
 }
 
+template <typename T>
+T from_bitset(const std::bitset<64> &bs) {
+    return bs.to_ullong();
+}
+
 template <typename T, size_t N>
 void to_bitset(std::bitset<N> &bs, T v) {
-    // TODO: Optimize performance
     for (size_t i{}; i < N; i++)
         bs[i] = v & (1ull << i);
+}
+
+template <typename T>
+void to_bitset(std::bitset<64> &bs, T v) {
+    uint64_t t = v;
+    bs = std::bitset<64>{ t };
 }
 
 RISCVVectorController::logic_elem_t::operator elem_t() const {
@@ -90,19 +100,33 @@ RISCVVectorController::logic_elem_t::operator=(elem_t v) {
 
 RISCVVectorController::logic_elem_t::pos_t
 RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
-    auto i = id * p->ew + b;
-    auto piece = i / SLEN;
-    auto offset = i % SLEN;
-    uint16_t mul;
-    if (p->lmul >= 1.0)
-        mul = p->lmul;
-    else
-        mul = 1u;
-    auto shifts = piece / mul;
-    auto col = shifts / 64u;
-    auto shift = shifts % 64u;
+    panic_if(id * p->ew >= p->vlen * p->lmul,
+            "id(%llu) too large for ew(%u) and mul(%f)", id, p->ew, p->lmul);
+    panic_if(b >= p->ew,
+            "b(%u) too large for ew(%u)", b, p->ew, p->lmul);
+
+    // Number of sections per phy-reg
+    auto secs = p->vlen / SLEN;
+    // Number of elems per section
+    auto elms = SLEN / p->ew;
+    // Index of the section containing the elem
+    auto sec = id % secs;
+    // Index of the elem in its section
+    auto eid = (id / secs) % elms;
+    // Index of the phy-reg containing the elem
+    auto phy = (id / secs) / elms;
+    // Index of the bit in its section
+    auto offset = eid * p->ew + b;
+    // Index of mem column containing the bit
+    auto col = sec / 64u;
+    // Index of the bit in mem column
+    auto shift = sec % 64u;
+    // The mem column
     auto &c = (*p->mem)[col];
-    auto reg = p->rid + piece % mul;
+    // Index of phy-reg
+    auto reg = p->rid + phy;
+    DPRINTF(RVV, "id=%llu b=%u --> sec=%llu eid=%llu col=%llu phy=%llu offset=%llu shift=%u\n",
+            id, b, sec, eid, col, phy, offset, shift);
     return { &c.v[reg][offset], shift };
 }
 
@@ -149,6 +173,12 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
             mem[c].id.push_back( 0xffffffff00000000ull);
         for (; i < ids; i++)
             mem[c].id.push_back((c & (0x1ull << (i - 6ull))) ? ~0ull : 0ull);
+    }
+}
+
+extern "C" {
+    static void dbg(const char *str) {
+        DPRINTF(RVV, "%s", str);
     }
 }
 
@@ -214,7 +244,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             panic_if(nf != 0u, "Segment Load/Store (Zvlsseg) not implemented");
             panic_if(vm, "Masked Load/Store not implemented");
             base_address = rs1;
-            view = {&mem, EMUL, EEW, static_cast<uint16_t>(op_d)};
+            view = {&mem, VLEN, EMUL, EEW, static_cast<uint16_t>(op_d)};
             state = major_opcode == 0x27u
                 ? state_t::MEM_STORE : state_t::MEM_LOAD;
             result = { 500, nullptr, FANCY };
@@ -232,7 +262,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                 rcx.vxrm = csr_vxrm;
                 rcx.SEW = SEW(csr_vtype);
                 rcx.LMUL = EMUL;
-                switch (librvv_decode(&rcx, &dcx)) {
+                switch (librvv_decode(&rcx, &dcx, &dbg)) {
                     case ERR_NO:
                         break;
                     case ERR_INVALID_FUNCT3:
@@ -319,7 +349,7 @@ RISCVVectorController::execute() {
                 DPRINTF(RVV, "Executing column %d\n", i);
                 rcx.rf = &mem[i].v[0][0];
                 rcx.id = &mem[i].id[0];
-                librvv_execute(&rcx, &dcx);
+                librvv_execute(&rcx, &dcx, &dbg);
             }
             state = state_t::IDLE;
             return;

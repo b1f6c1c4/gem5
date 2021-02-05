@@ -101,6 +101,7 @@ class RISCVVectorController
 
     struct logic_reg_t {
         std::vector<column_t> *mem;
+        uint64_t vlen;
         double lmul;
         uint16_t ew;
         uint16_t rid;
