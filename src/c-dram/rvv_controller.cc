@@ -346,10 +346,14 @@ RISCVVectorController::execute() {
 
         case state_t::ARITH:
             for (size_t i{}; i < mem.size(); i++) {
-                DPRINTF(RVV, "Executing column %d\n", i);
+                if (!i)
+                    DPRINTF(RVV, "Executing column %d\n", i);
                 rcx.rf = &mem[i].v[0][0];
                 rcx.id = &mem[i].id[0];
-                librvv_execute(&rcx, &dcx, &dbg);
+                if (!i)
+                    librvv_execute(&rcx, &dcx, &dbg);
+                else
+                    librvv_execute(&rcx, &dcx, nullptr);
             }
             state = state_t::IDLE;
             return;
