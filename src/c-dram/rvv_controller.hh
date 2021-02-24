@@ -44,16 +44,28 @@ class RISCVVectorController
 {
   private:
 
-    RequestorID requestorId;
-    uint64_t VLEN;
+    enum csr_t {
+      VSTART = 0x008,
+      VXSAT  = 0x009,
+      VXRM   = 0x00a,
+      VXCSR  = 0x00f,
+      VL     = 0xc20,
+      VTYPE  = 0xc21,
+      VLENB  = 0xc22,
+    };
 
-    uint64_t csr_vstart = 0ull; // 0x008, URW
-    uint64_t csr_vxsat = 0ull;  // 0x009, URW
-    uint64_t csr_vxrm = 0ull;   // 0x00a, URW
-    uint64_t csr_vcsr = 0ull;   // 0x00f, URW
-    uint64_t csr_vl = 0ull;     // 0xc20, URO
-    uint64_t csr_vtype = 0ull;  // 0xc21, URO
-    uint64_t csr_vlenb;         // 0xc22, URO
+    RequestorID requestorId;
+    const uint64_t VLEN;
+
+    uint64_t csr_vstart = 0ull;
+    bool csr_vxsat      = false;
+    uint8_t csr_vxrm    = 0u;
+    uint64_t csr_vl     = 0ull;
+    uint64_t csr_vtype  = 0ull;
+    const uint64_t csr_vlenb;
+
+    uint64_t get_csr(uint16_t c) const;
+    void set_csr(uint16_t c, uint64_t v);
 
     struct column_t {
         typedef std::array<uint64_t, SLEN> reg_t;

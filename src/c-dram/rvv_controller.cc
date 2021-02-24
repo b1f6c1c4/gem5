@@ -38,6 +38,29 @@
 
 EmulationPageTable *g_rvv_controller_mmap{};
 
+uint64_t RISCVVectorController::get_csr(uint16_t c) const {
+    switch (c) {
+        case VSTART: return csr_vstart;
+        case VXSAT:  return csr_vxsat;
+        case VXRM:   return csr_vxrm;
+        case VXCSR:  return csr_vxrm << 1ull | csr_vxsat;
+        case VL:     return csr_vl;
+        case VTYPE:  return csr_vtype;
+        case VLENB:  return csr_vlenb;
+        default:     panic("Invalid CSR read"); return FANCY;
+    }
+}
+
+void RISCVVectorController::set_csr(uint16_t c, uint64_t v) {
+    switch (c) {
+        case VSTART: csr_vstart = v; break;
+        case VXSAT:  csr_vxsat = v; break;
+        case VXRM:   csr_vxrm = v; break;
+        case VXCSR:  csr_vxsat = v & 0x1; csr_vxrm = v >> 1 & 0x3; break;
+        default:     panic("Invalid CSR write"); break;
+    }
+}
+
 template <typename T, size_t N>
 T from_bitset(const std::bitset<N> &bs) {
     T v{};
@@ -195,7 +218,29 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
     bool mew = funct6 & 0x08u;
     auto mop = (funct6 & 0x06u) >> 1u;
     auto EMUL = LMUL(csr_vtype);
+    auto csr_c = static_cast<uint16_t>((instr & 0xfff00000ul) >> 20ul);
+    auto csr_v = (width & 0x4ul) ? op_1 : rs1;
     switch (major_opcode) {
+        case 0x73u: // Zicsr Instructions
+            switch (width & 0x3ul) {
+                case 1u: // CSRRWI?
+                    result = { 500, nullptr, op_d ? get_csr(csr_c) : FANCY };
+                    set_csr(csr_c, csr_v);
+                    break;
+                case 2u: // CSRRSI?
+                    result = { 500, nullptr, get_csr(csr_c) };
+                    if (op_1)
+                        set_csr(csr_c, get_csr(csr_c) | csr_v);
+                    break;
+                case 3u: // CSRRCI?
+                    result = { 500, nullptr, get_csr(csr_c) };
+                    if (op_1)
+                        set_csr(csr_c, get_csr(csr_c) & ~csr_v);
+                    break;
+                default:
+                    panic("Invalid Zicsr funct3 %d", width);
+            }
+            break;
         case 0x07u: // Vector Load Instructions under LOAD-FP major opcode
         case 0x27u: // Vector Store Instructions under STORE-FP major opcode
             nf = funct6 >> 4u;
