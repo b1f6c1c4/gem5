@@ -98,6 +98,10 @@ RISCVVectorController::logic_elem_t::operator elem_t() const {
     return v;
 }
 
+RISCVVectorController::logic_elem_t::operator bool() const {
+    return (*this)[0];
+}
+
 RISCVVectorController::logic_elem_t &
 RISCVVectorController::logic_elem_t::operator=(elem_t v) {
     switch (p->ew) {
@@ -114,10 +118,16 @@ RISCVVectorController::logic_elem_t::operator=(elem_t v) {
             to_bitset(v.bs, v.u64);
             break;
         default:
-            break;
+            panic("Invalid logic_elem_t ew");
     }
     for (uint_fast16_t i{}; i < p->ew; i++)
         (*this)[i] = v.bs[i];
+    return *this;
+}
+
+RISCVVectorController::logic_elem_t &
+RISCVVectorController::logic_elem_t::operator=(bool v) {
+    (*this)[0] = v;
     return *this;
 }
 
@@ -174,7 +184,7 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
     requestorId{reqId},
     VLEN{SLEN * par},
     csr_vlenb{VLEN / 8},
-    mem{(par + 63u) / 64u},
+    mem((par + 63u) / 64u),
     state{state_t::IDLE}
 {
     DPRINTF(RVV, "VLEN set to %d\n", VLEN);
@@ -287,9 +297,12 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                     break;
             }
             panic_if(nf != 0u, "Segment Load/Store (Zvlsseg) not implemented");
-            panic_if(vm, "Masked Load/Store not implemented");
             base_address = rs1;
             view = {&mem, VLEN, EMUL, EEW, static_cast<uint16_t>(op_d)};
+            if (vm) {
+                panic_if(EEW / EMUL > ELEN, "EEW/EMUL=%d/%f=%f larger then ELEN=%d", EEW, EMUL, EEW/EMUL, ELEN);
+                mask_view = {&mem, VLEN, 1, static_cast<uint16_t>(EEW / EMUL), 0};
+            }
             state = major_opcode == 0x27u
                 ? state_t::MEM_STORE : state_t::MEM_LOAD;
             result = { 500, nullptr, FANCY };
@@ -438,10 +451,15 @@ RISCVVectorController::execute() {
             delete result.pkt;
             result = { 500, nullptr, FANCY };
 
-            if (csr_vstart >= evl) {
-                state = state_t::IDLE;
-                csr_vstart = 0u;
-                return;
+            for (; true; csr_vstart++) {
+                if (csr_vstart >= evl) {
+                    state = state_t::IDLE;
+                    csr_vstart = 0u;
+                    return;
+                }
+                if (!vm) break;
+                if (mask_view[csr_vstart]) break;
+                result.time += 250;
             }
 
             Addr vaddr = base_address + stride * csr_vstart;

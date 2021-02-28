@@ -89,7 +89,9 @@ class RISCVVectorController
         uint64_t id;
 
         [[nodiscard]] operator elem_t() const;
+        [[nodiscard]] operator bool() const;
         logic_elem_t &operator=(elem_t v);
+        logic_elem_t &operator=(bool v);
 
       private:
         struct pos_t {
@@ -156,7 +158,7 @@ class RISCVVectorController
     uint64_t base_address;
     int64_t stride;
     uint16_t op_address_offset;
-    logic_reg_t view;
+    logic_reg_t view, mask_view;
     uint16_t EEW;
     uint16_t nf;
     uint64_t evl;
