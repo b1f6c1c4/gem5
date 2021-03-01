@@ -331,7 +331,9 @@ BaseXBar::findPort(AddrRange addr_range)
     assert(gotAllAddrRanges);
 
     // Check the address map interval tree
-    auto i = portMap.contains(addr_range);
+    auto i = portMap.contains(
+            addr_range.end() ? addr_range :
+            RangeEx(addr_range.start(), 0xffffffffffffffffull));
     if (i != portMap.end()) {
         return i->second;
     }
