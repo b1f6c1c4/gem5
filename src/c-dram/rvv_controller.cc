@@ -220,13 +220,13 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
         uint64_t rs1, uint64_t rd) {
     assert(state == state_t::IDLE);
     auto funct6 = (instr & 0xfc000000ul) >> 26ul;
-    auto op_2 = (instr & 0x001f0000ul) >> 20ul;
+    auto op_2 = (instr & 0x01f00000ul) >> 20ul;
     auto op_1 = (instr & 0x000f8000ul) >> 15ul;
     auto width = (instr & 0x00007000ul) >> 12ul;
     auto op_d = (instr & 0x00000f80ul) >> 7ul;
     auto major_opcode = instr & 0x0000007ful;
-    bool mew = funct6 & 0x08u;
-    auto mop = (funct6 & 0x06u) >> 1u;
+    bool mew = funct6 & 0x04u;
+    auto mop = funct6 & 0x03u;
     auto EMUL = LMUL(csr_vtype);
     auto csr_c = static_cast<uint16_t>((instr & 0xfff00000ul) >> 20ul);
     auto csr_v = (width & 0x4ul) ? op_1 : rs1;
@@ -253,8 +253,8 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             break;
         case 0x07u: // Vector Load Instructions under LOAD-FP major opcode
         case 0x27u: // Vector Store Instructions under STORE-FP major opcode
-            nf = funct6 >> 4u;
-            vm = funct6 & 0x01u;
+            nf = funct6 >> 3u;
+            vm = !(instr & 0x02000000ul);
             panic_if(width >= 1u && width <= 4u,
                     "Vector Load/Store with invalid width");
             EEW = 8u << ((width & 3u) | (mew ? 4u : 0u));
