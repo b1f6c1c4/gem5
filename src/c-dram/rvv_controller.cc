@@ -172,11 +172,11 @@ constexpr bool vta(uint64_t vtype) {
 }
 
 constexpr double LMUL(uint64_t vtype) {
-    return (1ull << (vtype & 0x03ull)) / ((vtype & 0x20ull) ? 16.0 : 1.0);
+    return (1ull << (vtype & 0x03ull)) / ((vtype & 0x04ull) ? 16.0 : 1.0);
 }
 
 constexpr uint64_t SEW(uint64_t vtype) {
-    return 8ull << ((vtype & 0x1cull) >> 2u);
+    return 8ull << ((vtype & 0x38ull) >> 3u);
 }
 
 RISCVVectorController::RISCVVectorController(uint64_t par,
