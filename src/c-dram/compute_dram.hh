@@ -252,7 +252,7 @@ class ComputeDRAM : public SimObject
 
     /** constructor
      */
-    ComputeDRAM(ComputeDRAMParams *params);
+    ComputeDRAM(const ComputeDRAMParams &params);
 
     /**
      * Get a port with a given name and index. This is used at

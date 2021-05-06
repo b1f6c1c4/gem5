@@ -34,14 +34,14 @@
 #include "mem/request.hh"
 #include "sim/system.hh"
 
-ComputeDRAM::ComputeDRAM(ComputeDRAMParams *params) :
+ComputeDRAM::ComputeDRAM(const ComputeDRAMParams &params) :
     SimObject{params},
-    instPort{params->name + ".inst_port", this},
-    dataPort{params->name + ".data_port", this},
+    instPort{params.name + ".inst_port", this},
+    dataPort{params.name + ".data_port", this},
     processEvent{[this]{ processHandler(false); }, name()},
     blocked{false},
     state{state_t::IDLE},
-    controller{params->parallelism, params->sys->getRequestorId(this, "data")}
+    controller{params.parallelism, params.sys->getRequestorId(this, "data")}
 {
 }
 
@@ -314,12 +314,4 @@ void
 ComputeDRAM::sendRangeChange()
 {
     instPort.sendRangeChange();
-}
-
-
-
-ComputeDRAM*
-ComputeDRAMParams::create()
-{
-    return new ComputeDRAM(this);
 }
