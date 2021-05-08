@@ -160,7 +160,7 @@ RISCVVectorController::logic_elem_t::operator[](uint16_t b) const {
     auto reg = p->rid + phy;
     DPRINTF(RVV, "id=%llu b=%u --> sec=%llu eid=%llu col=%llu phy=%llu offset=%llu shift=%u\n",
             id, b, sec, eid, col, phy, offset, shift);
-    return { &c.v[reg][offset], shift };
+    return { &c.v[reg][offset], &c.v_bar[reg][offset], shift };
 }
 
 constexpr bool vma(uint64_t vtype) {
@@ -206,6 +206,8 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
             mem[c].id.push_back( 0xffffffff00000000ull);
         for (; i < ids; i++)
             mem[c].id.push_back((c & (0x1ull << (i - 6ull))) ? ~0ull : 0ull);
+        for (i = 0; i < ids; i++)
+            mem[c].id_bar.push_back(~mem[c].id[i]);
     }
 }
 
@@ -325,50 +327,49 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                         break;
                     case ERR_INVALID_FUNCT3:
                         panic("librvv: ERR_INVALID_FUNCT3");
-                        break;
                     case ERR_INVALID_FUNCT6:
                         panic("librvv: ERR_INVALID_FUNCT6");
-                        break;
                     case ERR_INVALID_NODE_TYPE:
                         panic("librvv: ERR_INVALID_NODE_TYPE");
-                        break;
                     case ERR_USE_DISABLED_OP_1:
                         panic("librvv: ERR_USE_DISABLED_OP_1");
-                        break;
                     case ERR_INVALID_LMUL:
                         panic("librvv: ERR_INVALID_LMUL");
-                        break;
                     case ERR_INVALID_SEW:
                         panic("librvv: ERR_INVALID_SEW");
-                        break;
                     default:
                         panic("librvv: Unknown error");
-                        break;
                 }
                 state = state_t::ARITH;
                 result = { 500 + dcx.time_cost, nullptr, FANCY };
             } else {
                 // Vector Configuration Instructions under OP-V major opcode
                 uint16_t zimm;
-                if (instr & 0x80000000ul)
+                if ((instr >> 31) == 0b0ul)
+                    zimm = (instr & 0x7ff00000ul) >> 20u; // vsetvli
+                else if ((instr >> 30) == 0b11ul)
+                    zimm = (instr & 0x3ff00000ul) >> 20u; // vsetivli
+                else if ((instr >> 25) == 0b1000000ul)
                     zimm = rs2; // vsetvl
                 else
-                    zimm = (instr & 0x7ff00000ul) >> 20u; // vsetvli
+                    panic("librvv: Unknown vector config instr");
 
                 uint64_t AVL;
-                if (op_d == 0u && op_1 == 0u)
+                if ((instr >> 30) == 0b11ul) //  vsetivli
+                    AVL = op_1;
+                else if (op_d == 0u && op_1 == 0u)
                     AVL = csr_vl; // Change vtype keeping existing vl
                 else if (op_d != 0u && op_1 == 0u)
                     AVL = ~0ull; // Set vl to VLMAX
                 else // if (op_1 != 0u)
                     AVL = rs1; // Normal stripmining
 
-                DPRINTF(RVV, "vsetvl[i]: vtype=%#x LMUL=%f SEW=%d\n",
+                DPRINTF(RVV, "vset[i]vl[i]: vtype=%#x LMUL=%f SEW=%d\n",
                         zimm, LMUL(zimm), SEW(zimm));
 
                 uint64_t VLMAX = LMUL(zimm) * VLEN / SEW(zimm);
 
-                DPRINTF(RVV, "vsetvl[i]: AVL=%d VLMAX=%d\n", AVL, VLMAX);
+                DPRINTF(RVV, "vset[i]vl[i]: AVL=%d VLMAX=%d\n", AVL, VLMAX);
 
                 csr_vtype = zimm;
 
@@ -407,7 +408,9 @@ RISCVVectorController::execute() {
                 if (!i)
                     DPRINTF(RVV, "Executing column %d\n", i);
                 rcx.rf = &mem[i].v[0][0];
+                rcx.rf_bar = &mem[i].v_bar[0][0];
                 rcx.id = &mem[i].id[0];
+                rcx.id_bar = &mem[i].id_bar[0];
                 if (!i)
                     librvv_execute(&rcx, &dcx, &dbg);
                 else

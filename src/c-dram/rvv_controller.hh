@@ -69,8 +69,8 @@ class RISCVVectorController
 
     struct column_t {
         typedef std::array<uint64_t, SLEN> reg_t;
-        std::array<reg_t, 32> v;
-        std::vector<uint64_t> id;
+        std::array<reg_t, 32> v, v_bar;
+        std::vector<uint64_t> id, id_bar;
     };
 
     struct elem_t {
@@ -95,17 +95,24 @@ class RISCVVectorController
 
       private:
         struct pos_t {
-            uint64_t *ref;
+            uint64_t *ref, *ref_bar;
             uint64_t shift;
 
             [[nodiscard]] operator bool() const {
-                return *ref & (1ull << shift);
+                auto p = *ref & (1ull << shift);
+                auto n = *ref_bar & (1ull << shift);
+                panic_if(p == n, "Not complement");
+                return p;
             }
             pos_t &operator=(bool v) {
                 if (v)
                     *ref |= 1ull << shift;
                 else
                     *ref &= ~(1ull << shift);
+                if (!v)
+                    *ref_bar |= 1ull << shift;
+                else
+                    *ref_bar &= ~(1ull << shift);
                 return *this;
             }
         };
