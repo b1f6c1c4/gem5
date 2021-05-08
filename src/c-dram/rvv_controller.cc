@@ -206,6 +206,10 @@ RISCVVectorController::RISCVVectorController(uint64_t par,
             mem[c].id.push_back( 0xffffffff00000000ull);
         for (; i < ids; i++)
             mem[c].id.push_back((c & (0x1ull << (i - 6ull))) ? ~0ull : 0ull);
+
+        for (size_t r{}; r < 32; r++)
+            for (size_t i{}; i < SLEN; i++)
+                mem[c].v_bar[r][i] = ~0ull;
         for (i = 0; i < ids; i++)
             mem[c].id_bar.push_back(~mem[c].id[i]);
     }
