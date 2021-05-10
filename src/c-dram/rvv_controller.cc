@@ -466,7 +466,8 @@ RISCVVectorController::execute() {
                 }
                 if (!vm) break;
                 if (mask_view[csr_vstart]) break;
-                result.time += 250;
+                // TODO: BW on the opposite side is the limiting factor
+                // result.time += EEW / 8.48e10 * 1e12;
             }
 
             Addr vaddr = base_address + stride * csr_vstart;
