@@ -482,10 +482,12 @@ RISCVVectorController::execute() {
                 DPRINTF(RVV, "Request Load for vaddr=%#x paddr=%#x size=%d\n",
                         vaddr, paddr, size);
                 result.pkt = Packet::createRead(req);
+                result.pkt->cmd = MemCmd::ReadExReq;
                 result.pkt->allocate();
             } else {
                 DPRINTF(RVV, "Request Store for vaddr=%#x paddr=%#x size=%d\n",
                         vaddr, paddr, size);
+                req->setFlags(Request::UNCACHEABLE);
                 result.pkt = Packet::createWrite(req);
                 result.pkt->allocate();
                 elem_t b = view[csr_vstart];
