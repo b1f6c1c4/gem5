@@ -79,6 +79,8 @@ class BaseMMU : public SimObject
     translateAtomic(const RequestPtr &req, ThreadContext *tc,
                     BaseTLB::Mode mode)
     {
+        if (req->getVaddr() >= 0xfffffffffffff000ull)
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
         return getTlb(mode)->translateAtomic(req, tc, mode);
     }
 
@@ -86,6 +88,8 @@ class BaseMMU : public SimObject
     translateTiming(const RequestPtr &req, ThreadContext *tc,
                     BaseTLB::Translation *translation, BaseTLB::Mode mode)
     {
+        if (req->getVaddr() >= 0xfffffffffffff000ull)
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
         return getTlb(mode)->translateTiming(req, tc, translation, mode);
     }
 
@@ -93,6 +97,8 @@ class BaseMMU : public SimObject
     translateFunctional(const RequestPtr &req, ThreadContext *tc,
                         BaseTLB::Mode mode)
     {
+        if (req->getVaddr() >= 0xfffffffffffff000ull)
+            req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
         return getTlb(mode)->translateFunctional(req, tc, mode);
     }
 
