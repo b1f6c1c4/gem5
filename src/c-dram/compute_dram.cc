@@ -41,7 +41,7 @@ ComputeDRAM::ComputeDRAM(const ComputeDRAMParams &params) :
     processEvent{[this]{ processHandler(false); }, name()},
     blocked{false},
     state{state_t::IDLE},
-    controller{params.parallelism, params.sys->getRequestorId(this, "data")}
+    controller{params.parallelism, params.sys->getRequestorId(this, "data"), this}
 {
 }
 

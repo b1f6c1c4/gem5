@@ -34,6 +34,35 @@
 #include "mem/packet_access.hh"
 #include "mem/page_table.hh"
 
+RISCVVectorController::StatGroup::StatGroup(Stats::Group *parent)
+    : Stats::Group(parent),
+      ADD_STAT(timeWaitingForMemResp, UNIT_TICK,
+              "Total time waiting for memory response"),
+      ADD_STAT(timeWaitingForArithmetic, UNIT_TICK,
+              "Total time doing in-memory computation"),
+      ADD_STAT(numLoadStores, UNIT_COUNT,
+              "Number of vector load/store"),
+      ADD_STAT(bytesReadWritten, UNIT_COUNT,
+              "Number of bytes read/written during vector load/vector store"),
+      ADD_STAT(numLoadStores1, UNIT_COUNT,
+              "Number of vector load/store (EEW=8)"),
+      ADD_STAT(elemsReadWritten1, UNIT_COUNT,
+              "Number of elements read/written during vector load/vector store (EEW=8)"),
+      ADD_STAT(numLoadStores2, UNIT_COUNT,
+              "Number of vector load/store (EEW=16)"),
+      ADD_STAT(elemsReadWritten2, UNIT_COUNT,
+              "Number of elements read/written during vector load/vector store (EEW=16)"),
+      ADD_STAT(numLoadStores4, UNIT_COUNT,
+              "Number of vector load/store (EEW=32)"),
+      ADD_STAT(elemsReadWritten4, UNIT_COUNT,
+              "Number of elements read/written during vector load/vector store (EEW=32)"),
+      ADD_STAT(numLoadStores8, UNIT_COUNT,
+              "Number of vector load/store (EEW=64)"),
+      ADD_STAT(elemsReadWritten8, UNIT_COUNT,
+              "Number of elements read/written during vector load/vector store (EEW=64)")
+{
+}
+
 #define FANCY 0x1145141919810233ull
 
 EmulationPageTable *g_rvv_controller_mmap{};
@@ -180,7 +209,8 @@ constexpr uint64_t SEW(uint64_t vtype) {
 }
 
 RISCVVectorController::RISCVVectorController(uint64_t par,
-        RequestorID reqId) :
+        RequestorID reqId, Stats::Group *parent) :
+    stats(parent),
     requestorId{reqId},
     VLEN{SLEN * par},
     csr_vlenb{VLEN / 8},
@@ -312,6 +342,13 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
             state = major_opcode == 0x27u
                 ? state_t::MEM_STORE : state_t::MEM_LOAD;
             result = { 500, nullptr, FANCY };
+            stats.numLoadStores++;
+            switch (EEW) {
+                case 8: stats.numLoadStores1++; break;
+                case 16: stats.numLoadStores2++; break;
+                case 32: stats.numLoadStores4++; break;
+                case 64: stats.numLoadStores8++; break;
+            }
             break;
         case 0x57u:
             if (width != 0x7u) {
@@ -346,6 +383,7 @@ RISCVVectorController::decode(uint32_t instr, uint64_t rs2,
                 }
                 state = state_t::ARITH;
                 result = { 500 + dcx.time_cost, nullptr, FANCY };
+                stats.timeWaitingForArithmetic += dcx.time_cost;
             } else {
                 // Vector Configuration Instructions under OP-V major opcode
                 uint16_t zimm;
@@ -428,6 +466,7 @@ RISCVVectorController::execute() {
             panic_if(mem_op == INDEXED, "Indexed Load/Store not implemented");
 
             if (result.pkt) {
+                stats.timeWaitingForMemResp += curTick() - time_req_sent - 500;
                 // if (mem_op == FAULT_ONLY_FIRST)
                 if (state == state_t::MEM_LOAD) {
                     elem_t b{};
@@ -473,12 +512,20 @@ RISCVVectorController::execute() {
             Addr vaddr = base_address + stride * csr_vstart;
             Addr paddr;
             auto size = EEW / 8u;
+            stats.bytesReadWritten += size;
+            switch (EEW) {
+                case 8: stats.elemsReadWritten1++; break;
+                case 16: stats.elemsReadWritten2++; break;
+                case 32: stats.elemsReadWritten4++; break;
+                case 64: stats.elemsReadWritten8++; break;
+            }
             panic_if(!g_rvv_controller_mmap, "No mmap found");
             if (!g_rvv_controller_mmap->translate(vaddr, paddr)) {
                 panic("Request Untranslatable for vaddr=%#x paddr=%#x size=%d\n",
                         vaddr, paddr, size);
             }
             req = std::make_shared<Request>(paddr, size, 0ull, requestorId);
+            time_req_sent = curTick();
             if (state == state_t::MEM_LOAD) {
                 DPRINTF(RVV, "Request Load for vaddr=%#x paddr=%#x size=%d\n",
                         vaddr, paddr, size);

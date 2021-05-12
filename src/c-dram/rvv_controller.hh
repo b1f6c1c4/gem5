@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <vector>
 #include "../../../rvv_impl.h"
+#include "base/statistics.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
 
@@ -42,6 +43,19 @@
 
 class RISCVVectorController
 {
+  protected: // Stats
+
+    struct StatGroup : public Stats::Group {
+        StatGroup(Stats::Group *parent);
+        Stats::Scalar timeWaitingForMemResp;
+        Stats::Scalar timeWaitingForArithmetic;
+        Stats::Scalar numLoadStores, bytesReadWritten;
+        Stats::Scalar numLoadStores1, elemsReadWritten1;
+        Stats::Scalar numLoadStores2, elemsReadWritten2;
+        Stats::Scalar numLoadStores4, elemsReadWritten4;
+        Stats::Scalar numLoadStores8, elemsReadWritten8;
+    } stats;
+
   private:
 
     enum csr_t {
@@ -149,7 +163,7 @@ class RISCVVectorController
 
   public:
 
-    RISCVVectorController(uint64_t par, RequestorID reqId);
+    RISCVVectorController(uint64_t par, RequestorID reqId, Stats::Group *parent);
 
     void decode(uint32_t instr, uint64_t rs2, uint64_t rs1, uint64_t rd);
 
@@ -171,6 +185,7 @@ class RISCVVectorController
     uint64_t evl;
     bool vm;
     RequestPtr req;
+    Tick time_req_sent;
     enum {
         UNIT_STRIDE,
         WHOLE_REGISTERS,
